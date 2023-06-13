@@ -1,0 +1,9 @@
+<launch>
+	<include file="$(find simple_sim_h_course)/launch/h_loop_inner.launch">
+	</include>
+
+	<node name="follow_line" pkg="follow_lane_pkg" type="follow_line.py" required="true" output="screen">
+		<param name="imgtopic_name" type="str" value="camera_view" />
+	</node>
+
+</launch>
