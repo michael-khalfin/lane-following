@@ -1,0 +1,9 @@
+<launch>
+	<include file="$(find simple_sim_circleroad)/launch/circleroad.launch">
+	</include>
+
+	<node name="between_lines" pkg="follow_lane_pkg" type="between_lines.py" required="true" output="screen">
+		<param name="imgtopic_name" type="str" value="camera_view" />
+	</node>
+
+</launch>

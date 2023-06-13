@@ -1,0 +1,14 @@
+<launch>
+	<include file="$(find avt_vimba_camera)/launch/mono_camera.launch">
+		<arg name="ip" value="192.168.60.40"/>
+		<arg name="reverse_x" value="true"/>
+		<arg name="reverse_y" value="true"/>
+	</include>
+
+	<node pkg="rqt_reconfigure" type="rqt_reconfigure" name="rqt_console" args="-t" />
+
+	<node name="follow_line_real" pkg="follow_lane_pkg" type="follow_line_real.py" required="true" output="screen">
+		<param name="imgtopic_name" type="str" value="camera_view" />
+	</node>
+
+</launch>
