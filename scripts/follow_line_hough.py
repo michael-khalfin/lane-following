@@ -105,12 +105,12 @@ class FollowLine:
 
     
 
-    def drive_2_follow_line(self, lines) -> 'None':
+    def drive_2_follow_line(self, lines,image):
         """
         Inputs:
             lines: list of Hough lines in form of [x1,y1,x2,y2]
         Outputs:
-            None
+            Image for the purposes of labelling
         Description:
             Self drive algorithm to follow lane by rotating wheels to steer
             toward center of the lane
@@ -158,12 +158,25 @@ class FollowLine:
             
             if left_line+right_line>2:
                 #turn_right
-                self.vel_msg.angular.z=-0.3
+                cv2.putText(image,f"Turn Right",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
+                number=(-1/log(abs(avg_left_slope)+abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
+                if abs(number)>self.config.turn_max:
+                    number=-1*self.config.turn_max
+                elif abs(number)<self.config.turn_min:
+                    number=-1*self.config.turn_min
+                self.vel_msg.angular.z=number
             elif left_line+right_line<2:
                 #turn left
-                self.vel_msg.angular.z=0.3
+                cv2.putText(image,f"Turn Left",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
+                number=(1/log(abs(avg_left_slope)+abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
+                if abs(number)>self.config.turn_max:
+                    number=self.config.turn_max
+                elif abs(number)<self.config.turn_min:
+                    number=self.config.turn_min
+                self.vel_msg.angular.z=number
             else:
                 #go staight
+                cv2.putText(image,f"Go Straight",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
                 self.vel_msg.angular.z=0
 
                 
@@ -173,6 +186,7 @@ class FollowLine:
             self.vel_msg.angular.z = 0
 
         self.velocity_pub.publish(self.vel_msg)
+        return image
 
 if __name__ == '__main__':
     rospy.init_node('follow_line', anonymous=True)
