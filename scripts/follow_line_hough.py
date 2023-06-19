@@ -159,7 +159,7 @@ class FollowLine:
             if left_line+right_line>2:
                 #turn_right
                 cv2.putText(image,f"Turn Right",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
-                number=(-1/log(abs(avg_left_slope)+abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
+                number=(-1/log(abs(avg_left_slope)*abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
                 if abs(number)>self.config.turn_max:
                     number=-1*self.config.turn_max
                 elif abs(number)<self.config.turn_min:
@@ -168,7 +168,7 @@ class FollowLine:
             elif left_line+right_line<2:
                 #turn left
                 cv2.putText(image,f"Turn Left",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
-                number=(1/log(abs(avg_left_slope)+abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
+                number=(1/log(abs(avg_left_slope)*abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
                 if abs(number)>self.config.turn_max:
                     number=self.config.turn_max
                 elif abs(number)<self.config.turn_min:
