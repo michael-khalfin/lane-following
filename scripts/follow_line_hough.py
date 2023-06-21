@@ -7,8 +7,10 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
 from dynamic_reconfigure.server import Server
 from follow_lane_pkg.cfg import FollowLaneHoughConfig
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TwistStamped
 import numpy as np
+from math import log, sin, cos, atan
+import time
 
 
 class FollowLine:
@@ -17,23 +19,36 @@ class FollowLine:
         rospy.loginfo("Follow line initialized")
         self.bridge = CvBridge()
         self.vel_msg = Twist()
+        self.vel_msg.angular.z = 0
         self.empty = Empty()
+        self.twist = TwistStamped()
 
         self.cols = 0 # set later
         self.rows = 0
 
         self.enable_car = rospy.Publisher('/vehicle/enable', Empty, queue_size=1)
         self.velocity_pub = rospy.Publisher('/vehicle/cmd_vel', Twist, queue_size=1)
+        
 
         self.config = None
         self.srv = Server(FollowLaneHoughConfig, self.dyn_rcfg_cb)
 
+        self.config.canny_thresh_l = 20
+        self.config.canny_thresh_u = 120
+
+        rospy.Subscriber('/vehicle/twist', TwistStamped, self.vel_callback)
         rospy.Subscriber('/camera/image_raw', Image, self.camera_callback)
+        
 
     def dyn_rcfg_cb(self, config, level):
         rospy.logwarn("Got config")
         self.config = config
         return config
+
+    def vel_callback(self, msg: TwistStamped):
+        self.twist = msg.twist
+        #rospy.loginfo(self.twist.linear.x)
+        #cv2.waitKey(2)
 
     def camera_callback(self, msg: Image):
         rospy.loginfo("Got image")
@@ -56,26 +71,47 @@ class FollowLine:
         lines = cv2.HoughLinesP(proc_image, 
                                rho=self.config.lines_rho, 
                                theta=0.01745329251, 
-                               threshold=self.config.lines_thresh
+                               threshold=self.config.lines_thresh,
+                               minLineLength=50,
+                               maxLineGap=0
                                )
         
         
         if lines is not None:
+            lines=[l[0] for l in lines]
+            slopes=[]
             for l in lines:
                 #Graph lines on proc_image
-                #(l[0],l[1]),(l[2],l[3]) are start and end ponit respectively
+                #(l[0],l[1]),(l[2],l[3]) are start and end point respectively
                 #(255,0,0) is color of line(blue)
                 #2 is thickness of line
+                slope=0
+                try:
+                    slope=(l[1]-l[3])/(l[0]-l[2])
+                except:
+                    rospy.logwarn("Divided by zero in slopes")
+                    continue
+                if abs(slope)<0.25 or abs(slope)>100:
+                    #rospy.loginfo(f"Begone {slope}")
+                    continue
+                # if ((l[1]-l[3])+(l[0]-l[2]))**0.5 <50:
+                #     continue
                 
-                cv2.line(image,(l[0][0],l[0][1]),(l[0][2],l[0][3]),(255,0,0),2)
-            lines=[l[0] for l in lines]
-            self.drive_2_follow_line(lines)
+                cv2.line(image,(l[0],l[1]),(l[2],l[3]),(255,0,0),2)
+                #rospy.logwarn(type(slope))
+                if isinstance(slope, np.float64) and not np.isnan(slope):
+                    slopes.append(slope)
+                    #rospy.loginfo(f"Adding {slope}")
+
+            #rospy.logwarn(slopes)
+            
+            image=self.drive_2_follow_line(lines,image,slopes)
                 
 
         
         cv2.imshow("My Image Window", image)
         cv2.imshow("BW_Image", proc_image)
-        cv2.waitKey(3)
+        cv2.waitKey(2)
 
     def preprocess(self, orig_image):
         """
@@ -105,7 +141,7 @@ class FollowLine:
 
     
 
-    def drive_2_follow_line(self, lines,image):
+    def drive_2_follow_line(self, lines,image,slopes):
         """
         Inputs:
             lines: list of Hough lines in form of [x1,y1,x2,y2]
@@ -115,76 +151,115 @@ class FollowLine:
             Self drive algorithm to follow lane by rotating wheels to steer
             toward center of the lane
         """
-
+        
+        
         mid = self.cols / 2
         self.enable_car.publish(self.empty)
         
 
         if self.config.enable_drive:
-            left_lines=[l for l in lines if l[0]<mid]
-            right_lines=[l for l in lines if l[0]>=mid]
-            left_slopes=[(l[1]-l[3])/(l[0]-l[2]) for l in left_lines if (l[0]!=l[2])]
-            right_slopes=[(l[1]-l[3])/(l[0]-l[2]) for l in right_lines if (l[0]!=l[2])]
+            if self.twist.linear.x >= .7:
+                rospy.loginfo(f"DRIVING {self.config.speed} m/s")
+                self.vel_msg.linear.x = self.config.speed
+                try:
+                    slope=sum(slopes)/len(slopes)
 
-            rospy.loginfo(f"DRIVING {self.config.speed} m/s")
-            self.vel_msg.linear.x = self.config.speed
+                    # output a line to show the slope
+                    theta = abs(atan(slope))
+                    #rospy.loginfo(theta)
+                    x = int(cos(theta) * 200)
+                    y = int(sin(theta) * 200)
+                    #rospy.logwarn(str(theta) + " " + str(x) + " " + str(y))
+                    rospy.logwarn(slope)
+                    cv2.line(image,(int(mid),int(self.rows-1)),(int(mid - x),int(self.rows - 1 - y)),(255,0,0),2)
+                    cv2.line(image,(0,0),(100,100),(255,0,0),2)
 
-            avg_left_slope=sum(left_slopes)/len(left_slopes)
-            avg_right_slope=sum(right_slopes)/len(right_slopes)
-
-            right_line=1
-            left_line=1
-            
-            
-            if (avg_left_slope>-1*self.config.slopes_thresh) and (avg_left_slope<0):
-                #L-
-                left_line=2
-            elif (avg_left_slope<self.config.slopes_thresh) and (avg_left_slope>0):
-                #L+
-                left_line=0
-            else:
-                #L0
-                left_line=1
-            
-            if (avg_right_slope>-1*self.config.slopes_thresh) and (avg_right_slope<0):
-                #R-
-                left_line=2
-            elif (avg_right_slope<self.config.slopes_thresh) and (avg_right_slope>0):
-                #R+
-                right_line=0
-            else:
-                #R0
-                right_line=1
-            
-            if left_line+right_line>2:
-                #turn_right
-                cv2.putText(image,f"Turn Right",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
-                number=(-1/log(abs(avg_left_slope)*abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
-                if abs(number)>self.config.turn_max:
-                    number=-1*self.config.turn_max
-                elif abs(number)<self.config.turn_min:
-                    number=-1*self.config.turn_min
-                self.vel_msg.angular.z=number
-            elif left_line+right_line<2:
-                #turn left
-                cv2.putText(image,f"Turn Left",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
-                number=(1/log(abs(avg_left_slope)*abs(avg_right_slope)))*self.config.speed*self.config.turn_speed_const
-                if abs(number)>self.config.turn_max:
-                    number=self.config.turn_max
-                elif abs(number)<self.config.turn_min:
-                    number=self.config.turn_min
-                self.vel_msg.angular.z=number
-            else:
-                #go staight
-                cv2.putText(image,f"Go Straight",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
-                self.vel_msg.angular.z=0
-
+                    self.vel_msg.angular.z = slope * self.config.speed * self.config.turn_speed_const
+                except Exception as e:
+                    rospy.logwarn(f"No slopes: {e}")
+                    self.vel_msg.angular.z = 0
                 
 
+                #self.velocity_pub.publish(self.vel_msg)
+                # try:
+                #     avg_left_slope=sum(left_slopes)/len(left_slopes)
+                # except Exception as e:
+                #     avg_left_slope = 0.1
+
+                # try:
+                #     avg_right_slope=sum(right_slopes)/len(right_slopes)
+                # except Exception as e:
+                #     avg_right_slope = 0.1
+                # if avg_left_slope == 0:
+                #     avg_left_slope = 0.1
+                # if avg_right_slope == 0:
+                #     avg_right_slope = 0.1
+
+                # right_line=1
+                # left_line=1
+                
+                
+                # if (avg_left_slope>-1*self.config.slopes_thresh) and (avg_left_slope<0):
+                #     #L-
+                #     left_line=2
+                # elif (avg_left_slope<self.config.slopes_thresh) and (avg_left_slope>0):
+                #     #L+
+                #     left_line=0
+                # else:
+                #     #L0
+                #     left_line=1
+                
+                # if (avg_right_slope>-1*self.config.slopes_thresh) and (avg_right_slope<0):
+                #     #R-
+                #     left_line=2
+                # elif (avg_right_slope<self.config.slopes_thresh) and (avg_right_slope>0):
+                #     #R+
+                #     right_line=0
+                # else:
+                #     #R0
+                #     right_line=1
+
+                
+                # if left_line+right_line>2:
+                #     #turn_right
+                #     cv2.putText(image,f"Turn Right",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
+                #     # number=(-1/log(float(abs(avg_left_slope)+abs(avg_right_slope))))*self.config.speed*self.config.turn_speed_const
+                #     self.vel_msg.angular.z -= self.config.turn_speed_const
+                #     if abs(self.vel_msg.angular.z)>self.config.turn_max:
+                #         self.vel_msg.angular.z=-1*self.config.turn_max
+                #     # elif abs(self.vel_msg.angular.z)<self.config.turn_min:
+                #     #     self.vel_msg.angular.z=-1*self.config.turn_min
+                # elif left_line+right_line<2:
+                #     #turn left
+                #     cv2.putText(image,f"Turn Left",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
+                #     # number=(1/log(float(abs(avg_left_slope)+abs(avg_right_slope))))*self.config.speed*self.config.turn_speed_const
+                #     self.vel_msg.angular.z += self.config.turn_speed_const
+                #     if abs(self.vel_msg.angular.z)>self.config.turn_max:
+                #         self.vel_msg.angular.z=self.config.turn_max
+                #     # elif abs(self.vel_msg.angular.z)<self.config.turn_min:
+                #     #     self.vel_msg.angular.z=self.config.turn_min
+                # else:
+                #     #go staight
+                #     cv2.putText(image,f"Go Straight",(10,self.rows-10), cv2.FONT_HERSHEY_SIMPLEX, 1,(125,125,125),2,cv2.LINE_AA)
+                #     if abs(self.vel_msg.angular.z)<self.config.turn_speed_const:
+                #         self.vel_msg.angular.z=0
+                #     elif self.vel_msg.angular.z<0:
+                #         self.vel_msg.angular.z +=self.config.turn_speed_const
+                #     else:
+                #         self.vel_msg.angular.z -=self.config.turn_speed_const
+            else:
+                self.vel_msg.linear.x += .01
+                self.vel_msg.linear.z = 0
+
+
+
         else:
+            rospy.logwarn(f"else state")
             self.vel_msg.linear.x = 0
             self.vel_msg.angular.z = 0
 
+        
+        rospy.logwarn(f"publishing {self.vel_msg.linear.x}, {self.vel_msg.angular.z}")
         self.velocity_pub.publish(self.vel_msg)
         return image
 
