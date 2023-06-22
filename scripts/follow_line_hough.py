@@ -13,12 +13,16 @@ import numpy as np
 from math import log, sin, cos, atan, exp
 import statistics
 import time
+import pandas as pd
+import os
+import sys
 
 
 class FollowLine:
 
     def __init__(self):
         rospy.loginfo("Follow line initialized")
+        rospy.loginfo(os.path.abspath('follow_line_hough.py'))
         self.bridge = CvBridge()
         self.vel_msg = Twist()
         self.vel_msg.angular.z = 0
@@ -44,17 +48,25 @@ class FollowLine:
         #while( not rospy.is_shutdown() ):
             #rospy.Subscriber('/vehicle/twist', TwistStamped, self.vel_callback)
         rospy.Subscriber('/camera/image_raw', Image, self.camera_callback)
-        rospy.Subscriber('/red_topic', Bool, red_callback)
+        rospy.Subscriber('/red_topic', Bool, self.red_callback)
 
-        #Red Blob Detection Variables
+        # Red Blob Detection Variables
+        self.initial_time = rospy.Time.now().to_sec()
         self.n_laps = 0
         self.tot_frames = 0
+        self.t0 = 0
         #self.sum_steer_err = 0 Implement Later 
         self.avg_steer_err = 0
-        self.t0 = 0
         self.is_Driving = False
         self.perimeter = 106.97
         
+        self.data = {
+            'time': [],
+            'speed (m/s)': [],
+            'speed (km/hr)': [],
+            'speed (mi/hr)': [],
+            'avg steering center': []
+        }
 
         self.rate.sleep()
         
@@ -64,24 +76,39 @@ class FollowLine:
         self.config = config
         return config
 
-    def red_callback(msg):
-        global r_detected, n_laps, tot_frames, drive, t0
-        if msg.data == False: # found STOP sign and now gone.
+    def red_callback(self, msg):
+        if not msg.data and (rospy.Time.now().to_sec() - self.initial_time) > 5: # found STOP sign and now gone.
             self.n_laps += 1
-            #avg_steer_err = sum_steer_err/tot_frames Implement Later
+
+                #avg_steer_err = sum_steer_err/tot_frames Implement Later
         
             t1 = rospy.Time.now().to_sec()
-            dt = t1 - t0
-            s = perimeter/dt # meter per second
+            dt = t1 - self.t0
+            s = self.perimeter/dt # meter per second
             km_h = s*3.6 # 3,600m seconds / 1,000 meters (1km)
             miles_h = km_h * 0.62137119223733
-            print(f"** Lap#{n_laps}, t taken: {dt:.2f} seconds")
+            print(f"** Lap#{self.n_laps}, t taken: {dt:.2f} seconds")
             print(f"   Avg speed: {s:.2f} m/s, {km_h:.2f} km/h, {miles_h: .2f} miles/h")
             print(f"   Avg steer centering err = {0}") #implement later
+
+            self.data['time'].append(dt)
+            self.data['speed (m/s)'].append(s)
+            self.data['speed (km/hr)'].append(km_h)
+            self.data['speed (mi/hr)'].append(miles_h)
+            self.data['avg steering center'].append(0)
+            df = pd.DataFrame(self.data)
+
+            outname = 'data.csv'
+            outdir = '../actor_ws/src/follow_lane_pkg/data'
+            if not os.path.exists(outdir):
+                os.mkdir(outdir)
+            fullname = os.path.join(outdir, outname)
+            df.to_csv(fullname)
+
             self.t0 = rospy.Time.now().to_sec()
             #sum_steer_err = 0
             self.tot_frames = 0
-        
+            
         return
 
 
@@ -135,9 +162,6 @@ class FollowLine:
                     continue
                 
                 cv2.line(image,(l[0],l[1]),(l[2],l[3]),(255,0,0),2)
-                # if slope > 0:
-                #     slope *= 5
-                #     pass
                 if isinstance(slope, np.float64) and not np.isnan(slope):
                     slopes.append(slope)
             
@@ -147,6 +171,9 @@ class FollowLine:
         
         cv2.imshow("My Image Window", image)
         cv2.imshow("BW_Image", proc_image)
+        #cv2.imwrite('../actor_ws/src/follow_lane_pkg/data/image.png', image)
+        #cv2.imwrite('../actor_ws/src/follow_lane_pkg/data/image_bw.png', proc_image)
+        #sys.exit()
         cv2.waitKey(1)
 
     def preprocess(self, orig_image):
@@ -166,7 +193,6 @@ class FollowLine:
         self.rows=rows
         blur_image=cv2.cvtColor(blur_image,cv2.COLOR_BGR2GRAY)
         
-        #min_t is minty
         lower_canny_thresh = 0
         upper_canny_thresh = 100
         max_white = 0
@@ -212,7 +238,7 @@ class FollowLine:
         if not self.is_Driving and self.config.enable_drive:
             self.is_Driving = True
             self.t0 = rospy.Time.now().to_sec()
-        elif self.is_Driving and self.config.enable_drive = False
+        elif self.is_Driving and not self.config.enable_drive:
             self.is_Driving = False
 
         if self.config.enable_drive:
@@ -221,7 +247,6 @@ class FollowLine:
             try:
                 neg = [i for i in slopes if i < 0]
                 pos = [i for i in slopes if i > 0]
-                #slope=sum(slopes)/len(slopes)
                 slope = (len(neg)/(len(pos) + len(neg)) * sum(neg) + len(pos)/(len(pos) + len(neg)) * sum(pos)) / len(slopes)
 
                 # output a line to show the slope
@@ -235,36 +260,36 @@ class FollowLine:
                 self.median_list.append(slope)
                 
             except Exception as e:
-                rospy.logwarn(f"No slopes: {e}")
+                #rospy.logwarn(f"No slopes: {e}")
                 self.vel_msg.angular.z = 0
 
             median=statistics.median(self.median_list)
             #rospy.logwarn(median)
             if median > 0:
-                self.vel_msg.angular.z = self.sigmoid(median, L=.3, k=-22, x0=.42)
+                self.vel_msg.angular.z = self.sigmoid(median, L=.3, k=-30, x0=.5)
                 #self.vel_msg.angular.z = log(median) * self.config.turn_speed_const #* self.config.speed 
             elif median < 0:
-                self.vel_msg.angular.z = -1 * self.sigmoid(-1 * median, L=.3, k=-22, x0=.42)
+                self.vel_msg.angular.z = -1 * self.sigmoid(-1 * median, L=.3, k=-30, x0=.5)
                 # self.config.turn_speed_const
             else:
                 self.vel_msg.angular.z = 0
             
         else:
-            rospy.logwarn(f"else state")
+            #rospy.logwarn(f"else state")
             self.vel_msg.linear.x = 0
             self.vel_msg.angular.z = 0
 
         
-        rospy.logwarn(f"publishing {self.vel_msg.linear.x}, {self.vel_msg.angular.z}")
+        #rospy.logwarn(f"publishing {self.vel_msg.linear.x}, {self.vel_msg.angular.z}")
 
-        #self.enable_car.publish(Empty())
+        self.enable_car.publish(Empty())
         self.velocity_pub.publish(self.vel_msg)
 
-        #tot_frames is for red blob
-        tot_frames += 1
+        # tot_frames is for red blob
+        self.tot_frames += 1
 
         return image
-        #self.twist.linear.x >= .7:
+        # self.twist.linear.x >= .7:
 
 if __name__ == '__main__':
     rospy.init_node('follow_line', anonymous=True)
