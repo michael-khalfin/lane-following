@@ -16,6 +16,7 @@ import time
 import pandas as pd
 import os
 import sys
+from std_msgs.msg import String #new
 
 
 class FollowLine:
@@ -37,6 +38,7 @@ class FollowLine:
 
         self.enable_car = rospy.Publisher('/vehicle/enable', Empty, queue_size=1)
         self.velocity_pub = rospy.Publisher('/vehicle/cmd_vel', Twist, queue_size=1)
+        self.drive_pub = rospy.Publisher('/drive_enabled', Bool, queue_size=1)
         
 
         self.config = None
@@ -49,67 +51,80 @@ class FollowLine:
             #rospy.Subscriber('/vehicle/twist', TwistStamped, self.vel_callback)
         rospy.Subscriber('/camera/image_raw', Image, self.camera_callback)
         rospy.Subscriber('/red_topic', Bool, self.red_callback)
+        rospy.Subscriber('/red_detect_topic', String, red_callback)
+        
 
         # Red Blob Detection Variables
-        self.initial_time = rospy.Time.now().to_sec()
-        self.n_laps = 0
-        self.tot_frames = 0
-        self.t0 = 0
-        #self.sum_steer_err = 0 Implement Later 
-        self.avg_steer_err = 0
-        self.is_Driving = False
-        self.perimeter = 106.97
+        # self.initial_time = rospy.Time.now().to_sec()
+        # self.n_laps = 0
+        # self.tot_frames = 0
+        # self.t0 = 0
+        # #self.sum_steer_err = 0 Implement Later 
+        # self.avg_steer_err = 0
+        # self.is_Driving = False
+        # self.perimeter = 106.97
         
-        self.data = {
-            'time': [],
-            'speed (m/s)': [],
-            'speed (km/hr)': [],
-            'speed (mi/hr)': [],
-            'avg steering center': []
-        }
+        # self.data = {
+        #     'time': [],
+        #     'speed (m/s)': [],
+        #     'speed (km/hr)': [],
+        #     'speed (mi/hr)': [],
+        #     'avg steering center': []
+        # }
 
         self.rate.sleep()
         
+    def dyn_rcfg_pub_bool(): #new
+        bool_val = Bool()
+        bool_val.data = self.config.enable_drive
+        drive_pub.publish(bool_val) 
 
     def dyn_rcfg_cb(self, config, level):
         rospy.logwarn("Got config")
         self.config = config
         return config
 
-    def red_callback(self, msg):
-        if not msg.data and (rospy.Time.now().to_sec() - self.initial_time) > 5: # found STOP sign and now gone.
-            self.n_laps += 1
+    def red_callback(msg): #new
 
-                #avg_steer_err = sum_steer_err/tot_frames Implement Later
-        
-            t1 = rospy.Time.now().to_sec()
-            dt = t1 - self.t0
-            s = self.perimeter/dt # meter per second
-            km_h = s*3.6 # 3,600m seconds / 1,000 meters (1km)
-            miles_h = km_h * 0.62137119223733
-            print(f"** Lap#{self.n_laps}, t taken: {dt:.2f} seconds")
-            print(f"   Avg speed: {s:.2f} m/s, {km_h:.2f} km/h, {miles_h: .2f} miles/h")
-            print(f"   Avg steer centering err = {0}") #implement later
+        if(len(msg.data) > 0):
+            print(msg.data)
 
-            self.data['time'].append(dt)
-            self.data['speed (m/s)'].append(s)
-            self.data['speed (km/hr)'].append(km_h)
-            self.data['speed (mi/hr)'].append(miles_h)
-            self.data['avg steering center'].append(0)
-            df = pd.DataFrame(self.data)
-
-            outname = 'data.csv'
-            outdir = '../actor_ws/src/follow_lane_pkg/data'
-            if not os.path.exists(outdir):
-                os.mkdir(outdir)
-            fullname = os.path.join(outdir, outname)
-            df.to_csv(fullname)
-
-            self.t0 = rospy.Time.now().to_sec()
-            #sum_steer_err = 0
-            self.tot_frames = 0
-            
         return
+
+    # def red_callback(self, msg):
+    #     if not msg.data and (rospy.Time.now().to_sec() - self.initial_time) > 5: # found STOP sign and now gone.
+    #         self.n_laps += 1
+
+    #             #avg_steer_err = sum_steer_err/tot_frames Implement Later
+        
+    #         t1 = rospy.Time.now().to_sec()
+    #         dt = t1 - self.t0
+    #         s = self.perimeter/dt # meter per second
+    #         km_h = s*3.6 # 3,600m seconds / 1,000 meters (1km)
+    #         miles_h = km_h * 0.62137119223733
+    #         print(f"** Lap#{self.n_laps}, t taken: {dt:.2f} seconds")
+    #         print(f"   Avg speed: {s:.2f} m/s, {km_h:.2f} km/h, {miles_h: .2f} miles/h")
+    #         print(f"   Avg steer centering err = {0}") #implement later
+
+    #         self.data['time'].append(dt)
+    #         self.data['speed (m/s)'].append(s)
+    #         self.data['speed (km/hr)'].append(km_h)
+    #         self.data['speed (mi/hr)'].append(miles_h)
+    #         self.data['avg steering center'].append(0)
+    #         df = pd.DataFrame(self.data)
+
+    #         outname = 'data.csv'
+    #         outdir = '../actor_ws/src/follow_lane_pkg/data'
+    #         if not os.path.exists(outdir):
+    #             os.mkdir(outdir)
+    #         fullname = os.path.join(outdir, outname)
+    #         df.to_csv(fullname)
+
+    #         self.t0 = rospy.Time.now().to_sec()
+    #         #sum_steer_err = 0
+    #         self.tot_frames = 0
+            
+    #     return
 
 
     def vel_callback(self, msg: TwistStamped):
@@ -331,11 +346,11 @@ class FollowLine:
         
         #rospy.logwarn(f"publishing {self.vel_msg.linear.x}, {self.vel_msg.angular.z}")
 
-        self.enable_car.publish(Empty())
+        # self.enable_car.publish(Empty())
         self.velocity_pub.publish(self.vel_msg)
 
         # tot_frames is for red blob
-        self.tot_frames += 1
+        # self.tot_frames += 1
 
         return image
         # self.twist.linear.x >= .7:
