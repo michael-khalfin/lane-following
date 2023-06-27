@@ -175,7 +175,6 @@ class FollowLine:
         #cv2.imwrite('../actor_ws/src/follow_lane_pkg/data/image_bw.png', proc_image)
         #sys.exit()
         cv2.waitKey(1)
-
     def preprocess(self, orig_image):
         """
         Inputs:
@@ -184,7 +183,8 @@ class FollowLine:
             bw_image: black-white image after preprocessing
         """
 
-        #blur_image = cv2.medianBlur(orig_image,self.config.blur_kernal)
+                #blur_image = cv2.medianBlur(orig_image,self.config.blur_kernal)
+        #Make first black and white image
         blur_image = cv2.GaussianBlur(orig_image,(9,9),0)
         
 
@@ -208,7 +208,8 @@ class FollowLine:
                     upper_canny_thresh=max_t
                     if count >= 10:
                         break
-
+                        pass
+        
             
         canny_image = cv2.Canny(blur_image,lower_canny_thresh,upper_canny_thresh,apertureSize=3)
 
@@ -217,7 +218,55 @@ class FollowLine:
         dilation_anchor=(blob_size,blob_size)
         dilate_element=cv2.getStructuringElement(cv2.MORPH_RECT,dilation_size,dilation_anchor)
         bw_image=cv2.dilate(canny_image,dilate_element)
-        return bw_image
+
+        thresh=210
+        #Make the second black and white image
+        gray_image = cv2.cvtColor(orig_image, cv2.COLOR_BGR2GRAY)
+        ret, bw_image2 = cv2.threshold(gray_image, # input image
+                                        thresh,     # threshold value
+                                        255,        # max value in image
+                                        cv2.THRESH_BINARY) # threshold type
+
+        num_white_pix = cv2.countNonZero(bw_image2)
+        total_pix = rows * cols
+        percent_white = num_white_pix / total_pix * 100
+
+        thresh_max = 248
+        thresh_min = 0
+        change = 64
+        percent_white_min=2
+        percent_white_max=3
+
+        while (percent_white > percent_white_max) or (percent_white < percent_white_min):
+            if percent_white > percent_white_max:
+                thresh += change
+                if thresh > thresh_max:
+                    thresh = thresh_max
+            elif percent_white < percent_white_min:
+                thresh -= change
+                if thresh < thresh_min:
+                    thresh = thresh_min
+            else:
+                break
+            ret, bw_image2 = cv2.threshold(gray_image, # input image
+                                            thresh,     # threshold value,
+                                            255,        # max value in image
+                                            cv2.THRESH_BINARY) # threshold type
+            num_white_pix = cv2.countNonZero(bw_image2)
+            percent_white = num_white_pix / total_pix * 100
+            change /= 2
+            if change < 2:
+                break
+        bw_image=cv2.dilate(bw_image2,dilate_element)
+
+        dif_image=cv2.subtract(bw_image,bw_image2)
+        dif_image2=cv2.subtract(bw_image2,bw_image)
+        dif_image=cv2.add(dif_image,dif_image2)
+        new_proc=cv2.add(bw_image,bw_image2)
+        new_proc=cv2.subtract(new_proc,dif_image)
+
+
+        return new_proc
 
     def sigmoid(self, x, L=1, k=-1, x0=0):
         return L / (1 + exp(k*(x-x0)))
