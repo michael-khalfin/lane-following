@@ -60,7 +60,7 @@ class FollowLine:
         cv2.imshow("BW_Image", proc_image)
         cv2.waitKey(3)
 
-    def preprocess(self, orig_image, thresh) -> 'blackwhite_image':
+def preprocess(self, orig_image):
         """
         Inputs:
             orig_image: original bgr8 image before preprocessing
@@ -68,50 +68,84 @@ class FollowLine:
             bw_image: black-white image after preprocessing
         """
 
-        orig_image = cv2.medianBlur(orig_image,9)
+                #blur_image = cv2.medianBlur(orig_image,self.config.blur_kernal)
+        #Make first black and white image
+        blur_image = cv2.GaussianBlur(orig_image,(9,9),0)
+        
 
-        (rows, cols, channels) = orig_image.shape
+        (rows, cols, channels) = blur_image.shape
         self.cols = cols
+        self.rows=rows
+        blur_image=cv2.cvtColor(blur_image,cv2.COLOR_BGR2GRAY)
+        
+        lower_canny_thresh = 0
+        upper_canny_thresh = 100
+        max_white = 0
+        count = 0
+        for min_t in range(0,101,10):
+            for max_t in range(min_t+50,min_t+121,10):
+                temp_image = cv2.Canny(blur_image,min_t,max_t,apertureSize=3)
+                p_white = cv2.countNonZero(temp_image)
+                if p_white > max_white:
+                    count += 1
+                    max_white=p_white
+                    lower_canny_thresh=min_t
+                    upper_canny_thresh=max_t
+                    if count >= 10:
+                        break
+                        pass
+        
+            
+        canny_image = cv2.Canny(blur_image,lower_canny_thresh,upper_canny_thresh,apertureSize=3)
 
+        blob_size=self.config.dilation_base
+        dilation_size=(2*blob_size+1,2*blob_size+1)
+        dilation_anchor=(blob_size,blob_size)
+        dilate_element=cv2.getStructuringElement(cv2.MORPH_RECT,dilation_size,dilation_anchor)
+        bw_image=cv2.dilate(canny_image,dilate_element)
+
+        thresh=210
+        #Make the second black and white image
         gray_image = cv2.cvtColor(orig_image, cv2.COLOR_BGR2GRAY)
-        ret, bw_image = cv2.threshold(gray_image, # input image
+        ret, bw_image2 = cv2.threshold(gray_image, # input image
                                         thresh,     # threshold value
                                         255,        # max value in image
                                         cv2.THRESH_BINARY) # threshold type
 
-        num_white_pix = cv2.countNonZero(bw_image)
+        num_white_pix = cv2.countNonZero(bw_image2)
         total_pix = rows * cols
         percent_white = num_white_pix / total_pix * 100
 
         thresh_max = 248
         thresh_min = 0
         change = 64
+        percent_white_min=2
+        percent_white_max=3
 
-        while (percent_white > self.config.percent_white_max) or \
-        (percent_white < self.config.percent_white_min):
-            if percent_white > self.config.percent_white_max:
+        while (percent_white > percent_white_max) or (percent_white < percent_white_min):
+            if percent_white > percent_white_max:
                 thresh += change
                 if thresh > thresh_max:
                     thresh = thresh_max
-            elif percent_white < self.config.percent_white_min:
+            elif percent_white < percent_white_min:
                 thresh -= change
                 if thresh < thresh_min:
                     thresh = thresh_min
             else:
                 break
-            ret, bw_image = cv2.threshold(gray_image, # input image
+            ret, bw_image2 = cv2.threshold(gray_image, # input image
                                             thresh,     # threshold value,
                                             255,        # max value in image
                                             cv2.THRESH_BINARY) # threshold type
-            num_white_pix = cv2.countNonZero(bw_image)
+            num_white_pix = cv2.countNonZero(bw_image2)
             percent_white = num_white_pix / total_pix * 100
             change /= 2
             if change < 2:
                 break
+        rospy.logwarn(bw_image)
+        rospy.loginfo(bw_image2)
 
-        rospy.loginfo(f"The percent white is: {percent_white}%")
-        rospy.loginfo(f"The Threshold is: {thresh}")
-        
+
         return bw_image
 
     def find_center_point(self, bw_image) -> 'contour, centroid coordinates x, y':
