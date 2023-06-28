@@ -190,7 +190,8 @@ class FollowLine:
         #cv2.imwrite('../actor_ws/src/follow_lane_pkg/data/image_bw.png', proc_image)
         #sys.exit()
         cv2.waitKey(1)
-    def preprocess(self, orig_image):
+        
+    def preprocess(self,orig_image):
         """
         Inputs:
             orig_image: original bgr8 image before preprocessing
@@ -228,7 +229,7 @@ class FollowLine:
             
         canny_image = cv2.Canny(blur_image,lower_canny_thresh,upper_canny_thresh,apertureSize=3)
 
-        blob_size=self.config.dilation_base
+        blob_size=6
         dilation_size=(2*blob_size+1,2*blob_size+1)
         dilation_anchor=(blob_size,blob_size)
         dilate_element=cv2.getStructuringElement(cv2.MORPH_RECT,dilation_size,dilation_anchor)
@@ -272,7 +273,7 @@ class FollowLine:
             change /= 2
             if change < 2:
                 break
-        bw_image=cv2.dilate(bw_image2,dilate_element)
+        bw_image2=cv2.dilate(bw_image2,dilate_element)
 
         dif_image=cv2.subtract(bw_image,bw_image2)
         dif_image2=cv2.subtract(bw_image2,bw_image)
