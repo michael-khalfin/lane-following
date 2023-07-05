@@ -5,8 +5,11 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
+#SLOPE_TOPIC = '/wslope'
 SLOPE_TOPIC = '/slope'
+#SLOPE_TOPIC = '/median'
 VEH_STEERING_TOPIC = '/vehicle/twist'
 
 class RegModel:
@@ -31,6 +34,8 @@ class RegModel:
             self.model = self.arctan_reg(gen_img=gen_img)
         elif self.model_name == 3:
             self.model = self.piecewise_reg(gen_img=gen_img)
+        elif self.model_name == 4:
+            self.model = self.modified_linear_reg(gen_img=gen_img)
         elif self.model_name == -1:
             pass
         else:
@@ -63,7 +68,9 @@ class RegModel:
                 i = 0
             i += 1
 
-        data['slope'].pop()
+        #data['slope'].pop()
+        data['ang_z'].pop()
+        print(len(data['slope']), len(data['ang_z']))
         bag.close()
 
         return pd.DataFrame.from_dict(data).sample(frac = 1)
@@ -115,8 +122,9 @@ class RegModel:
         print(f'mae for baseline: {mae_baseline}, training: {mae_training}, testing: {mae_testing}')
         return y_pred_baseline, y_pred_training
 
-    def sigmoid(self, x, L, x0, k, b):
+    def sigmoid(self, x, k, b, L=.18, x0=.2):
         return L / (1 + np.exp(-k * (x - x0))) + b
+        
     def log_reg(self, gen_img=False):
         """
         Fits the logistic regression model using the training data and returns the optimized parameters. 
@@ -127,7 +135,8 @@ class RegModel:
         :return: (list) A list of optimized parameters for the logistic regression model.
         """
         # mandatory guess
-        p0 = [max(self.y), np.median(self.X), 1, min(self.y)]
+        p0 = [max(self.y), min(self.y)]
+        # np.median(self.X), 1
 
         # popt stores the best fit parameters
         # pcov stores the covariance matrix
@@ -179,13 +188,14 @@ class RegModel:
 
         return popt
     
-    def f(self, x, x0, x1, k1, k2, m, b, r1=.3, r2=.45):
+    def f(self, x, x0, x1, k1, k2, m, b, r1=.35, r2=.45):
         x = np.array(x)
         conds = [x < r1, (x >= r1) * (x < r2), x >= r2]
         f1 = lambda x: -1/(x+x0)+k1
         f2 = lambda x: m*x + b
         f3 = lambda x: -1/(x+x1)+k2
         return np.piecewise(x, conds, [f1, f2, f3])
+
     def piecewise_reg(self, gen_img=False):
         """
         Fits three regression models using the training data and returns the optimized parameters. 
@@ -217,6 +227,21 @@ class RegModel:
 
         return popt
 
+    def modified_linear_reg(self, gen_img=False):
+        if gen_img:
+            fig, ax = plt.subplots(figsize=(15,6))
+            plot_acf(self.y, ax=ax)
+            plt.xlabel("Lag [hours]")
+            plt.ylabel("Correlation Coefficient")
+            plt.show()
+
+            fig, ax = plt.subplots(figsize=(15,6))
+            plot_pacf(self.y, ax=ax)
+            plt.xlabel("Lag [hours]")
+            plt.ylabel("Correlation Coefficient")
+            plt.show()            
+        return 0
+
     def make_prediction(self, slope):
         """
         Given a slope value, this function returns a prediction based on the model_name set for the instance.
@@ -243,7 +268,12 @@ class RegModel:
         elif self.model_name == 2:
             prediction = self.arctan(slope, *self.model)
             return prediction
+        elif self.model_name == 3:
+            prediction = self.f(slope, *self.model)
+            return prediction
 
 if __name__ == '__main__':
-    for i in range(4):
-        model = RegModel('2023-06-26-11-01-18.bag', model_name=i, gen_img=True)
+    #for i in range(4):
+        #model = RegModel('2023-06-29-11-22-51.bag', model_name=i, gen_img=True)
+    model = RegModel('2023-07-05-10-31-30.bag', model_name=-1, gen_img=True)
+    #print(model.make_prediction(.4))
